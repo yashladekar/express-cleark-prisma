@@ -1,22 +1,66 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import compression from "compression";
+import morgan from "morgan";
+import swaggerUi from "swagger-ui-express";
 import { clerkMiddleware } from "@clerk/express";
 import logger from "./lib/logger";
 import prisma from "./lib/prisma";
+import env from "./lib/env";
+import swaggerSpec from "./lib/swagger";
 import { generalLimiter } from "./middleware/rateLimiter";
-import { errorHandler } from "./middleware/errorHandler";
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
+import requestIdMiddleware from "./middleware/requestId";
 import clerkWebhookRouter from "./routes/clerk.webhook";
 import userRouter from "./routes/user";
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = env.PORT || 3001;
+
+// Trust proxy - required for rate limiting behind reverse proxy
+app.set("trust proxy", 1);
+
+// Security headers
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "https:"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  })
+);
+
+// Request ID for distributed tracing
+app.use(requestIdMiddleware);
+
+// Response compression
+app.use(compression());
 
 // CORS configuration
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: env.FRONTEND_URL || "http://localhost:3000",
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-request-id"],
+  })
+);
+
+// HTTP request logging
+const morganFormat = env.NODE_ENV === "production" ? "combined" : "dev";
+app.use(
+  morgan(morganFormat, {
+    stream: {
+      write: (message: string) => logger.http(message.trim()),
+    },
+    skip: (req) => req.url === "/health" || req.url === "/ready",
   })
 );
 
@@ -28,20 +72,60 @@ app.use(generalLimiter);
 app.use("/api/webhooks/clerk", clerkWebhookRouter);
 
 // Body parsing middleware (after webhook route)
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "10kb" })); // Limit body size
+app.use(express.urlencoded({ extended: true, limit: "10kb" }));
 
 // Clerk authentication middleware
 app.use(clerkMiddleware());
 
-// Health check endpoints
+// API Documentation
+app.use(
+  "/api/docs",
+  swaggerUi.serve,
+  swaggerUi.setup(swaggerSpec, {
+    explorer: true,
+    customSiteTitle: "Express Prisma Clerk API Documentation",
+  })
+);
+
+/**
+ * @swagger
+ * /health:
+ *   get:
+ *     summary: Basic health check
+ *     tags: [Health]
+ *     responses:
+ *       200:
+ *         description: Server is healthy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/HealthResponse'
+ */
 app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     timestamp: new Date().toISOString(),
+    version: process.env.npm_package_version || "1.0.0",
   });
 });
 
+/**
+ * @swagger
+ * /ready:
+ *   get:
+ *     summary: Readiness check with database connection
+ *     tags: [Health]
+ *     responses:
+ *       200:
+ *         description: Server is ready and database is connected
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/HealthResponse'
+ *       503:
+ *         description: Server is not ready
+ */
 app.get("/ready", async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -61,6 +145,9 @@ app.get("/ready", async (_req, res) => {
 
 // API routes
 app.use("/api/users", userRouter);
+
+// 404 handler for undefined routes
+app.use(notFoundHandler);
 
 // Error handler (must be last)
 app.use(errorHandler);

@@ -4,36 +4,57 @@ A production-ready API template using Express.js, Prisma ORM, and Clerk authenti
 
 ## Features
 
-- ✅ Express.js with TypeScript
+### Core
+- ✅ Express.js 5 with TypeScript
 - ✅ Prisma ORM with PostgreSQL
 - ✅ Clerk authentication with automatic user sync via webhooks
+
+### Security
+- ✅ Helmet security headers
 - ✅ Rate limiting with express-rate-limit
-- ✅ Winston logging
+- ✅ Input validation with Zod
+- ✅ Environment variable validation
+- ✅ Request body size limits
+- ✅ CORS configuration
+
+### Production-Ready
+- ✅ Request ID tracking for distributed tracing
+- ✅ HTTP request logging with Morgan
+- ✅ Winston structured logging
+- ✅ Response compression with gzip
 - ✅ Health check endpoints
-- ✅ Production-ready error handling
 - ✅ Graceful shutdown handling
+- ✅ Global error handling with proper error responses
+- ✅ 404 handler for undefined routes
+
+### Documentation
+- ✅ Swagger/OpenAPI documentation at `/api/docs`
+- ✅ Comprehensive README
 
 ## Project Structure
 
 ```
 ├── prisma/
-│   └── schema.prisma
+│   └── schema.prisma           # Database schema
 ├── src/
-│   ├── controllers/
-│   │   └── (empty - for future controllers)
+│   ├── controllers/            # Route controllers (empty - for future use)
 │   ├── lib/
-│   │   ├── prisma.ts
-│   │   └── logger.ts
+│   │   ├── env.ts              # Environment validation
+│   │   ├── logger.ts           # Winston logger configuration
+│   │   ├── prisma.ts           # Prisma client singleton
+│   │   └── swagger.ts          # Swagger/OpenAPI configuration
 │   ├── middleware/
-│   │   ├── rateLimiter.ts
-│   │   └── errorHandler.ts
+│   │   ├── errorHandler.ts     # Global error handler & 404 handler
+│   │   ├── rateLimiter.ts      # Rate limiting middleware
+│   │   ├── requestId.ts        # Request ID tracking
+│   │   └── validate.ts         # Zod validation middleware
 │   ├── routes/
-│   │   ├── clerk.webhook.ts
-│   │   └── user.ts
+│   │   ├── clerk.webhook.ts    # Clerk webhook handler
+│   │   └── user.ts             # User routes
 │   ├── types/
-│   │   └── express.d.ts
-│   └── index.ts
-├── .env.example
+│   │   └── express.d.ts        # Express type extensions
+│   └── index.ts                # Application entry point
+├── .env.example                # Environment template
 ├── .gitignore
 ├── package.json
 ├── tsconfig.json
@@ -88,6 +109,10 @@ npm run db:push
 npm run dev
 ```
 
+## API Documentation
+
+Interactive API documentation is available at `/api/docs` when the server is running.
+
 ## Clerk Webhook Setup
 
 To enable automatic user synchronization between Clerk and your database:
@@ -134,17 +159,23 @@ Use the generated URL as your webhook endpoint in Clerk Dashboard.
 |--------|----------|-------------|
 | POST | `/api/webhooks/clerk` | Clerk webhook handler |
 
+### Documentation
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/docs` | Swagger/OpenAPI documentation |
+
 ## Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `DATABASE_URL` | PostgreSQL connection string | Yes |
-| `CLERK_SECRET_KEY` | Clerk secret key | Yes |
-| `CLERK_PUBLISHABLE_KEY` | Clerk publishable key | Yes |
-| `CLERK_WEBHOOK_SECRET` | Clerk webhook signing secret | Yes |
-| `PORT` | Server port (default: 3001) | No |
-| `NODE_ENV` | Environment (development/production) | No |
-| `FRONTEND_URL` | Frontend URL for CORS (default: http://localhost:3000) | No |
+| Variable | Description | Required | Default |
+|----------|-------------|----------|---------|
+| `DATABASE_URL` | PostgreSQL connection string | Yes | - |
+| `CLERK_SECRET_KEY` | Clerk secret key | Yes | - |
+| `CLERK_PUBLISHABLE_KEY` | Clerk publishable key | Yes | - |
+| `CLERK_WEBHOOK_SECRET` | Clerk webhook signing secret | Yes | - |
+| `PORT` | Server port | No | 3001 |
+| `NODE_ENV` | Environment (development/production/test) | No | development |
+| `FRONTEND_URL` | Frontend URL for CORS | No | http://localhost:3000 |
 
 ## Scripts
 
@@ -158,19 +189,54 @@ Use the generated URL as your webhook endpoint in Clerk Dashboard.
 | `npm run db:migrate` | Run database migrations |
 | `npm run db:studio` | Open Prisma Studio |
 
-## Rate Limiting
+## Security Features
 
-The API includes two rate limiters:
+### Helmet
+Adds various HTTP headers to protect against common vulnerabilities:
+- Content Security Policy
+- XSS Protection
+- Clickjacking Protection
+- HSTS (in production)
+
+### Rate Limiting
+
+The API includes three rate limiters:
 
 - **General Limiter**: 100 requests per 15 minutes (applied to all routes)
 - **Auth Limiter**: 10 requests per 15 minutes (for authentication-heavy endpoints)
+- **API Limiter**: 30 requests per minute (for heavy API endpoints)
+
+### Input Validation
+All request bodies are validated using Zod schemas before processing.
+
+### Environment Validation
+All required environment variables are validated at startup to prevent runtime errors.
 
 ## Error Handling
 
 The API includes a global error handler that:
 - Logs errors with Winston
 - Returns appropriate HTTP status codes
+- Includes request ID for tracing
 - Includes stack traces in development mode only
+- Returns consistent error response format
+
+### Error Response Format
+```json
+{
+  "error": "Error message",
+  "statusCode": 500,
+  "requestId": "uuid",
+  "code": "ERROR_CODE"
+}
+```
+
+## Request Tracking
+
+Every request is assigned a unique request ID (UUID v4):
+- Can be passed via `x-request-id` header
+- Returned in response headers as `x-request-id`
+- Logged with every request for distributed tracing
 
 ## Graceful Shutdown
 
@@ -178,6 +244,29 @@ The server handles `SIGTERM` and `SIGINT` signals for graceful shutdown:
 - Closes HTTP server to stop accepting new connections
 - Disconnects from database
 - Forces shutdown after 30 seconds if connections don't close
+
+## Production Deployment
+
+1. Build the application:
+```bash
+npm run build
+```
+
+2. Set `NODE_ENV=production` in your environment
+
+3. Start the server:
+```bash
+npm start
+```
+
+### Production Checklist
+- [ ] Set `NODE_ENV=production`
+- [ ] Configure proper `DATABASE_URL` with connection pooling
+- [ ] Set `FRONTEND_URL` to your actual frontend domain
+- [ ] Configure Clerk production keys
+- [ ] Set up proper monitoring and alerting
+- [ ] Configure reverse proxy (nginx, etc.)
+- [ ] Enable HTTPS/SSL
 
 ## Reference
 

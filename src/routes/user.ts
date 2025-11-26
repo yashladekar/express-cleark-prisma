@@ -2,10 +2,38 @@ import { Router, Request, Response } from "express";
 import { requireAuth, getAuth } from "@clerk/express";
 import prisma from "../lib/prisma";
 import logger from "../lib/logger";
+import { validate, updateUserSchema } from "../middleware/validate";
 
 const router = Router();
 
-// Get current authenticated user
+/**
+ * @swagger
+ * /users/me:
+ *   get:
+ *     summary: Get current authenticated user
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: User profile
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/User'
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: User not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
   "/me",
   requireAuth(),
@@ -30,16 +58,48 @@ router.get(
 
       res.json(user);
     } catch (err) {
-      logger.error("Error fetching user", { error: err });
+      logger.error("Error fetching user", { error: err, requestId: req.requestId });
       res.status(500).json({ error: "Internal server error" });
     }
   }
 );
 
-// Update current user profile
+/**
+ * @swagger
+ * /users/me:
+ *   patch:
+ *     summary: Update current user profile
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateUser'
+ *     responses:
+ *       200:
+ *         description: Updated user profile
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/User'
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: User not found
+ */
 router.patch(
   "/me",
   requireAuth(),
+  validate(updateUserSchema),
   async (req: Request, res: Response): Promise<void> => {
     try {
       const auth = getAuth(req);
@@ -52,15 +112,6 @@ router.patch(
 
       const { firstName, lastName, plan } = req.body;
 
-      // Validate plan if provided
-      const allowedPlans = ["free", "pro", "enterprise"];
-      if (plan && !allowedPlans.includes(plan)) {
-        res.status(400).json({
-          error: "Invalid plan. Allowed values: free, pro, enterprise",
-        });
-        return;
-      }
-
       const user = await prisma.user.update({
         where: { clerkId: userId },
         data: {
@@ -72,7 +123,7 @@ router.patch(
 
       res.json(user);
     } catch (err) {
-      logger.error("Error updating user", { error: err });
+      logger.error("Error updating user", { error: err, requestId: req.requestId });
       res.status(500).json({ error: "Internal server error" });
     }
   }
